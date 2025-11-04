@@ -1,0 +1,395 @@
+import random
+import os
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# --- 1. Card Class ---
+class Card:
+    """カードの基本情報"""
+    def __init__(self, id, name, attack, cost, img):
+        self.id = id
+        self.name = name
+        self.attack = attack        # アタック値
+        self.cost = cost     # マナコスト 
+        self.power = 1000 * cost # パワー
+        self.img = img # 画像名
+
+              
+        # 実際にはテキストや効果も持つ
+# --- 2. Creature Class ---
+class Creature:
+    """場に出ているクリーチャーの状態"""
+    def __init__(self, card):
+        self.card = card
+        self.current_attack = card.attack # 現状は固定だが、効果で変わる可能性を考慮
+        self.current_power = card.power
+        self.is_tapped = False
+        self.can_attack_this_turn = False # 出たターンはアタック不可
+
+# --- 3. Player Class ---
+class Player:
+    """プレイヤーの基本情報と所有物を管理"""
+    def __init__(self, is_player1=True):
+        self.is_player1 = is_player1
+        self.life = 10
+        self.deck = []
+        self.hand = []
+        self.graveyard = [] #  墓地
+        self.mana = 0
+        self.max_mana = 0
+        self.field = [] # 場に出ているCreatureオブジェクトのリスト
+
+    def draw_card(self):
+        """山札からカードを引く"""
+        if not self.deck:
+            # 山札切れによる敗北判定
+            return False 
+        card = self.deck.pop(0)
+        self.hand.append(card)
+        return True
+
+    def setup_deck(self, card_list):
+        """デッキを初期化してシャッフル"""
+        # 5種4枚の合計20枚をセットアップ
+        self.deck = card_list * 4 
+        random.shuffle(self.deck)
+
+# --- 4. Game Class ---
+class Game:
+    """ゲーム全体の進行と状態を管理"""
+    def __init__(self):
+        # カード定義の例 (実際のゲームではより複雑)
+        CARD_PROTOTYPES = [
+            Card(1, "戦士", 3, 2,""),  # id,name,attack,cost,img
+            Card(2, "魔術師", 1, 1,""),
+            Card(3, "騎士", 5, 4,""),
+            Card(4, "弓兵",2, 2,""),
+            Card(5, "ゴーレム", 4, 3,""),
+        ]
+        
+        self.player1 = Player(is_player1=True)
+        self.player2 = Player(is_player1=False)
+        
+        self.player1.setup_deck(CARD_PROTOTYPES)
+        self.player2.setup_deck(CARD_PROTOTYPES) # デッキは同じ定義でOK
+        
+        # 先攻後攻をランダムで決定
+        self.current_turn_player = random.choice([self.player1, self.player2])
+        self.turn_count = 1
+        self.game_state = 'START'
+        self.current_turn_player.max_mana = min(self.current_turn_player.max_mana + 1, 10)
+        self.current_turn_player.mana = self.current_turn_player.max_mana
+        self.current_turn_player.go = "先攻"
+        if self.current_turn_player == self.player1:
+            self.player2.go = "後攻"
+        else:
+            self.player1.go = "後攻"
+        self.init_game()
+
+    def init_game(self):
+        """ゲーム開始時の初期設定"""
+        for _ in range(3):
+            self.player1.draw_card()
+            self.player2.draw_card()
+        self.game_state = 'MAIN_PHASE'
+
+    def next_turn(self):
+        """ターン進行処理"""
+        # プレイヤーの交代
+        if self.current_turn_player == self.player1:
+            self.current_turn_player = self.player2
+            self.turn_count += 1
+            for c in self.player2.field:
+                c.is_tapped = False
+                c.can_attack_this_turn = True
+        else:
+            self.current_turn_player = self.player1
+            self.turn_count += 1
+            for c in self.player1.field:
+                c.is_tapped = False
+                c.can_attack_this_turn = True
+            
+        player = self.current_turn_player
+        
+        # マナの増加
+        player.max_mana = min(player.max_mana + 1, 10) # 例として最大マナを10に設定
+        player.mana = player.max_mana
+        
+        # ドロー (先攻1ターン目以外)
+        if self.turn_count >= 1 or (self.turn_count == 1 and self.current_turn_player == self.player2):
+            if not player.draw_card():
+                # ドロー失敗で山札切れ負け
+                return self.check_win_condition() 
+
+        # クリーチャーのフラグ更新
+        for creature in player.field:
+            creature.is_tapped = False
+            creature.can_attack_this_turn = True 
+            
+        self.game_state = 'MAIN_PHASE'
+        
+        return self.check_win_condition()
+
+    def check_win_condition(self):
+        """勝利条件のチェック"""
+        if self.player1.life <= 0: # 山札切れ敗北の機能追加が必要
+            return "Player 2 Win (Life 0)"
+        if self.player2.life <= 0:
+            return "Player 1 Win (Life 0)"
+        # 実際にはドロー時の山札切れチェックも必要
+        return None
+    
+def battle(attacker, enemy, attack_player, def_player):
+    """
+    バトルに関するクラス
+    ２体のクリーチャーをバトルさせる。
+    引数 attacker = 攻撃側のカード, enemy = 攻撃された側のカード, attack_player = ターンプレイヤー, def_player = もう一人のプレイヤー
+    """
+    if not attacker or not enemy:
+        return
+
+    print("=== Battle Start ===")
+
+    if enemy.current_power < attacker.current_power:
+        # 防御側が負け
+        for c in def_player.field:
+            if c is enemy:
+                def_player.field.remove(c)
+                def_player.graveyard.append(c)
+                break
+        else:
+            print("※ enemy が field に見つかりません（参照ずれ）")
+    elif attacker.current_power < enemy.current_power:
+        # 攻撃側が負け
+        for c in attack_player.field:
+            if c is attacker:
+                attack_player.field.remove(c)
+                attack_player.graveyard.append(c)
+                break
+    else:
+        # 相打ち
+        for c in def_player.field:
+            if c is enemy:
+                def_player.field.remove(c)
+                def_player.graveyard.append(c)
+                break
+        for c in attack_player.field:
+            if c is attacker:
+                attack_player.field.remove(c)
+                attack_player.graveyard.append(c)
+                break
+
+    #print("After field:", [c.card.name for c in def_player.field])
+    print("=== Battle End ===")
+
+def attack_creature(num, attack_card, attack_player):
+    """
+    攻撃に関するクラス
+    攻撃選択したクリーチャーがフィールドに存在するか調べる。
+    引数 num = リストの順番, attack_card = 攻撃側のカード, attack_player = 攻撃側のプレイヤー
+    """
+    if attack_card is None:
+        attack_card = attack_player.field[num]
+        print(f"攻撃側選択: {attack_card.card.name}")
+    # 攻撃側をもう一度クリックすると選択解除
+    elif attack_card == attack_player.field[num]:
+        print(f"攻撃側解除: {attack_card.card.name}")
+        attack_card = None
+    return attack_card
+
+def chosen_creature(num, enemy_card, enemy_player):
+    if enemy_player is not None:
+        enemy_card = enemy_player.field[num]
+        if enemy_card.is_tapped: 
+            print(f"防御側選択: {enemy_card.card.name}")
+        else:
+            enemy_card = None
+        return enemy_card
+
+import pygame
+import sys
+# Gameクラス、Playerクラスなどは上記で定義済みとする
+
+# --- Pygameの初期設定 ---
+pygame.init()
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("Kokaton Master's")
+
+# 定数
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (200, 50, 50)
+BLUE = (50, 50, 200)
+GREEN = (100,200,100)
+YELLOW = (150,150,50)
+FONT = pygame.font.SysFont("hgp創英角ﾎﾟｯﾌﾟ体", 20)
+
+# --- 描画ユーティリティ関数 ---
+def draw_card_on_screen(screen, card_obj, x, y, is_creature=False, is_tapped=False):
+    """カードを画面に描画する（簡略化された四角形）"""
+    card_rect = pygame.Rect(x, y, 100, 140)
+    
+    # 基本の描画
+    color = BLUE if not is_creature else (100, 200, 100)
+    if is_tapped:
+        color = (150, 150, 150) # タップしている場合は灰色に
+    pygame.draw.rect(screen, color, card_rect, border_radius=5)
+    
+    # 情報の描画
+    name_surf = FONT.render(card_obj.card.name if is_creature else card_obj.name, True, BLACK)
+    attack_surf = FONT.render(f"A:{card_obj.card.attack if is_creature else card_obj.attack}", True, RED)
+    cost_surf = FONT.render(f"C:{card_obj.card.cost if is_creature else card_obj.cost}", True, WHITE)
+    power_surf = FONT.render(f"P:{card_obj.card.power if is_creature else card_obj.power}", True, WHITE)
+
+    screen.blit(name_surf, (x + 5, y + 50))
+    screen.blit(attack_surf, (x + 70, y + 110))
+    screen.blit(cost_surf, (x + 5, y + 5))
+    screen.blit(power_surf, (x + 5, y + 110))
+
+    return card_rect # クリック判定用にRectを返す
+
+def draw_player_status(screen, player, x, y,current):
+    """ライフとマナと先攻後攻の表示"""
+    life_text = FONT.render(f"LIFE: {player.life}", True, WHITE)
+    mana_text = FONT.render(f"MANA: {player.mana}/{player.max_mana}", True, WHITE)
+    if player == current:
+        go_text = FONT.render(player.go, True, RED)
+    else:
+        go_text = FONT.render(player.go, True, WHITE)
+    screen.blit(life_text, (x, y))
+    screen.blit(mana_text, (x, y + 30))
+    screen.blit(go_text, (x, y + 60))
+# --- メインゲームループ ---
+def run_game():
+    game = Game()
+    running = True
+    
+    # 選択中のカード/クリーチャーを管理する変数
+    selected_card = None 
+    attack_card = None
+    enemy_card = None
+    
+    while running:
+        current_player = game.current_turn_player
+        opponent_player = game.player2 if current_player == game.player1 else game.player1
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                pos = event.pos
+                
+                # --- ターン終了ボタンのクリック判定 ---
+                end_turn_rect = pygame.Rect(SCREEN_WIDTH - 150, SCREEN_HEIGHT // 2 - 25, 120, 50)
+                if end_turn_rect.collidepoint(pos):
+                    result = game.next_turn()
+                    game.game_state = 'MAIN_PHASE'
+                    if result:
+                        print(f"Game Over: {result}")
+                        running = False
+                # --- カード使用ボタンの判定 ---
+                if game.game_state == 'MAIN_PHASE':
+                    use_card_rect = pygame.Rect(30, SCREEN_HEIGHT // 2 - 25, 120, 50)
+                    if use_card_rect.collidepoint(pos):
+                        if(selected_card != None):
+                            if(selected_card.cost <= current_player.mana):
+                                current_player.mana -= selected_card.cost
+                                current_player.field.append(Creature(selected_card))
+                                current_player.hand.remove(selected_card)
+                                selected_card = None
+                    # --- カードを選ぶ判定 ---
+                    if current_player == game.player1:
+                        for i, card in enumerate(current_player.hand):
+                            if pygame.Rect(200 + i * 110, SCREEN_HEIGHT - 170, 300 + i * 110, SCREEN_HEIGHT - 30).collidepoint(pos):
+                                selected_card = card
+                    else:
+                        for i, card in enumerate(current_player.hand):
+                            if pygame.Rect(200 + i * 110, 30, 300 + i * 110, 170).collidepoint(pos):
+                                selected_card = card
+                # --- 攻撃の実装 ---
+                if current_player == game.player1:
+                    for i, card in enumerate(current_player.field):
+                        rect = pygame.Rect(200 + i * 110, SCREEN_HEIGHT - 350, 100, 140)
+                        if rect.collidepoint(pos):
+                            attack_card = attack_creature(i, attack_card, current_player)
+                    for i, card in enumerate(opponent_player.field):  # 相手のカードを選択
+                        rect = pygame.Rect(200 + i * 110, 220, 100, 140)
+                        if rect.collidepoint(pos):
+                            enemy_card = chosen_creature(i, enemy_card, opponent_player)
+                else:
+                    for i, card in enumerate(current_player.field):
+                        rect = pygame.Rect(200 + i * 110, 220, 100, 140)
+                        if rect.collidepoint(pos):
+                            attack_card = attack_creature(i, attack_card, current_player)
+                    for i, card in enumerate(opponent_player.field):  # 相手のカードを選択
+                        rect = pygame.Rect(200 + i * 110, SCREEN_HEIGHT - 350, 100, 140)
+                        if rect.collidepoint(pos):
+                            enemy_card = chosen_creature(i, enemy_card, opponent_player)
+                attack_card_rect = pygame.Rect(30, SCREEN_HEIGHT // 2 - 75, 120, 50)
+                if attack_card_rect.collidepoint(pos):
+                        if attack_card is None:
+                            continue
+                        
+                        if not attack_card.is_tapped and attack_card.can_attack_this_turn:
+                            game.game_state = 'ATTACK_PHASE'
+                            attack_card.is_tapped = True
+                            if enemy_card is not None:
+                                battle(attack_card, enemy_card, current_player, opponent_player)
+                            else:
+                                opponent_player.life -= attack_card.current_attack
+                        attack_card = None
+                        enemy_card = None
+
+                
+        # --- 描画処理 ---
+        screen.fill(GREEN)
+        
+        # プレイヤー1 (下側) の情報表示
+        draw_player_status(screen, game.player1, 50, SCREEN_HEIGHT - 150,current_player)
+        
+        # プレイヤー2 (上側) の情報表示
+        draw_player_status(screen, game.player2, 50, 50,current_player)
+        
+        # 手札の描画 (プレイヤー1: 下)
+        for i, card in enumerate(game.player1.hand):
+            draw_card_on_screen(screen, card, 200 + i * 110, SCREEN_HEIGHT - 170)
+        # 手札の描画 (プレイヤー2: 上)
+        for i, card in enumerate(game.player2.hand):
+            draw_card_on_screen(screen, card, 200 + i * 110, 30)
+
+        # 場に出ているクリーチャーの描画 (プレイヤー1: 中央下)
+        for i, creature in enumerate(game.player1.field):
+            draw_card_on_screen(screen, creature, 200 + i * 110, SCREEN_HEIGHT - 350, 
+                                is_creature=True, is_tapped=creature.is_tapped)
+
+        # 場に出ているクリーチャーの描画 (プレイヤー2: 中央上)
+        for i, creature in enumerate(game.player2.field):
+            draw_card_on_screen(screen, creature, 200 + i * 110, 220, 
+                                is_creature=True, is_tapped=creature.is_tapped)
+        # カード使用ボタン
+        use_card_rect = pygame.Rect(30, SCREEN_HEIGHT // 2 - 25, 120, 50)
+        pygame.draw.rect(screen, BLUE, use_card_rect, border_radius=5)
+        use_text = FONT.render("Use card", True, WHITE)
+        screen.blit(use_text, (use_card_rect.x + 10, use_card_rect.y + 15))
+
+        # 攻撃宣言ボタン
+        attack_card_rect = pygame.Rect(30, SCREEN_HEIGHT // 2 - 75, 120, 50)
+        pygame.draw.rect(screen, YELLOW, attack_card_rect, border_radius=5)
+        attack_text = FONT.render("Attack", True, WHITE)
+        screen.blit(attack_text, (attack_card_rect.x + 10, attack_card_rect.y + 15))
+
+        # ターン終了ボタン
+        end_turn_rect = pygame.Rect(SCREEN_WIDTH - 150, SCREEN_HEIGHT // 2 - 25, 120, 50)
+        pygame.draw.rect(screen, RED, end_turn_rect, border_radius=5)
+        end_text = FONT.render("End Turn", True, WHITE)
+        screen.blit(end_text, (end_turn_rect.x + 10, end_turn_rect.y + 15))
+
+        pygame.display.flip()
+        if game.check_win_condition() != None:
+            print(f"Game Over: {result}")
+            running = False
+    pygame.quit()
+    sys.exit()
+
+if __name__ == '__main__':
+    run_game() 
